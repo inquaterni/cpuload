@@ -1,0 +1,7 @@
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+
+cc_binary(
+    name = "cpuload_client",
+    srcs = ["main.cpp"],
+    deps = ["//src/common"],
+)

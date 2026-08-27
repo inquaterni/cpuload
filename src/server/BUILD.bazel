@@ -1,0 +1,15 @@
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+
+cc_binary(
+    name = "cpuload_server",
+    srcs = [
+        "cpu_sampler.cpp",
+        "cpu_sampler.h",
+        "file_logger.cpp",
+        "file_logger.h",
+        "ipc_server.cpp",
+        "ipc_server.h",
+        "main.cpp",
+    ],
+    deps = ["//src/common"],
+)
