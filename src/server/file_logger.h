@@ -6,6 +6,7 @@
 class file_logger {
 public:
     explicit file_logger(const char *path) noexcept;
+    file_logger() noexcept;
 
     file_logger(const file_logger&) = delete;
     file_logger& operator=(const file_logger&) = delete;
@@ -14,6 +15,8 @@ public:
 
     [[nodiscard]]
     constexpr bool enabled() const noexcept { return fd >= 0; }
+
+    void open(const char *path) noexcept;
 
     void write_snapshot(const static_buffer& data) const noexcept;
 

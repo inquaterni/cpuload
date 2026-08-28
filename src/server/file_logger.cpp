@@ -5,10 +5,13 @@
 #include "file_logger.h"
 
 file_logger::file_logger(const char *path) noexcept : fd(-1) {
-    if (!path)
-        return;
+    if (!path) return;
     tzset();
-    fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    fd = ::open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+}
+
+file_logger::file_logger() noexcept : fd(-1) {
+    tzset();
 }
 
 file_logger::~file_logger() {
@@ -17,6 +20,10 @@ file_logger::~file_logger() {
     }
 }
 
+void file_logger::open(const char *path) noexcept {
+    if (!path) return;
+    fd = ::open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+}
 void file_logger::write_snapshot(const static_buffer &data) const noexcept {
     if (fd < 0)
         return;

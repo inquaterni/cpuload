@@ -1,2 +1,4 @@
-bazel-*/
+bazel-*
+.idea/
+.vscode/
 /build/

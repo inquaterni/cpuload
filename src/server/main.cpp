@@ -14,6 +14,25 @@ namespace {
     using steady_clock = std::chrono::steady_clock;
     using milliseconds = std::chrono::milliseconds;
 
+    enum class state: uint8_t {
+        INIT,
+        RUN
+    };
+
+    struct context {
+        // A lot
+        cpu_sampler      sampler;
+        static_buffer    buf;
+        // 8
+        long             write_interval_ms = 1000;
+        const char*      log_file          = "/tmp/cpuload";
+        pollfd           fds {};
+        int64_t          last_write_ms {-1};
+        // 4
+        const ipc_server server;
+        file_logger      logger;
+    };
+
     int64_t now_ms() noexcept {
         return std::chrono::duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
     }
@@ -27,104 +46,111 @@ namespace {
             argv[0]);
     }
 
+    int parse_cli(const int argc, const char* argv[], context &ctx) noexcept {
+        if (argc == 3) {
+            char* end = nullptr;
+            const auto val = std::strtol(argv[1], &end, 10);
+            if (end == argv[1] || *end != '\0' || val == 0) {
+                std::fprintf(stderr, "error: interval must be a positive integer, got %s\n", argv[1]);
+                print_usage(argv);
+                return 1;
+            }
+            ctx.write_interval_ms = val;
+            if (strcmp(argv[2], "null") != 0 && strcmp(argv[2], "none") != 0) {
+                ctx.log_file = argv[2];
+            } else {
+                ctx.log_file = nullptr;
+            }
+        } else if (argc == 2) {
+            if (const char *arg = argv[1]; strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0) {
+                print_usage(argv);
+            } else {
+                char *end = nullptr;
+                if (const auto val = std::strtol(arg, &end, 10); val == 0) {
+                    if (end == argv[1] || *end != '\0' || val == 0) {
+                        std::fprintf(stderr, "error: interval must be a positive integer, got %s\n", argv[1]);
+                        print_usage(argv);
+                        return 1;
+                    }
+                }
+                std::fprintf(stderr, "Unknown option: %s\n", arg);
+                print_usage(argv);
+            }
+            return 1;
+        }
+        return 0;
+    }
+
 }
 
 int main(const int argc, const char* argv[]) {
 
-    long write_interval_ms = 1000;
-    auto log_file  = "/tmp/cpuload";
-
-    if (argc == 3) {
-        char* end = nullptr;
-        const auto val = std::strtol(argv[1], &end, 10);
-        if (end == argv[1] || *end != '\0' || val == 0) {
-            std::fprintf(stderr, "error: interval must be a positive integer, got %s\n", argv[1]);
-            print_usage(argv);
-            return 1;
-        }
-        write_interval_ms = val;
-        if (strcmp(argv[2], "null") != 0 && strcmp(argv[2], "none") != 0) {
-            log_file = argv[2];
-        } else {
-            log_file = nullptr;
-        }
-    } else if (argc == 2) {
-        if (const char *arg = argv[1]; strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0) {
-            print_usage(argv);
-        } else {
-            char *end = nullptr;
-            if (const auto val = std::strtol(arg, &end, 10); val == 0) {
-                if (end == argv[1] || *end != '\0' || val == 0) {
-                    std::fprintf(stderr, "error: interval must be a positive integer, got %s\n", argv[1]);
-                    print_usage(argv);
-                    return 1;
-                }
-            }
-            std::fprintf(stderr, "Unknown option: %s\n", arg);
-            print_usage(argv);
-        }
-        return 1;
-    }
-
-    cpu_sampler sampler;
-    std::fprintf(stderr, "Detected %zu CPU core(s)\n",
-                 sampler.hardware_concurrency());
-
-    const ipc_server server;
-    if (!server.valid()) {
-        std::fprintf(stderr, "error: failed to create socket %s: %s\n",
-                     SOCKET_PATH, std::strerror(errno));
-        return 1;
-    }
-    std::fprintf(stderr, "Listening on %s...\n", SOCKET_PATH);
-
-    if (log_file != nullptr) {
-        std::fprintf(stderr, "Logging to %s every %lu ms\n",
-                     log_file, write_interval_ms);
-    }
-    const file_logger logger(log_file);
-    if (log_file != nullptr && !logger.enabled()) {
-        std::fprintf(stderr, "error: failed to open log file %s: %s\n",
-                     log_file, std::strerror(errno));
-        return 1;
-    }
-
-    const int64_t interval_ms = write_interval_ms;
-    int64_t last_write_ms = now_ms();
-
-    pollfd pfd{};
-    pfd.fd     = server.listen_fd();
-    pfd.events = POLLIN;
-    static_buffer buf;
+    auto s = state::INIT;
+    context ctx;
+    int timeout_ms {-1};
 
     while (true) {
-        int timeout_ms {-1};
-        if (logger.enabled()) {
-            const int64_t elapsed = now_ms() - last_write_ms;
-            const int64_t remain  = interval_ms - elapsed;
-            if (remain >= std::numeric_limits<int>::max()) {
-                std::fprintf(stderr, "warn: interval exceeded the numeric limits of the integer type");
-            }
-            timeout_ms = remain > 0 ? static_cast<int>(remain) : 0;
-        }
+        switch (s) {
+            case state::INIT: {
+                if (const auto val = parse_cli(argc, argv, ctx); val != 0) {
+                    return val;
+                }
+                std::fprintf(stderr, "Detected %zu CPU core(s)\n",
+                     ctx.sampler.hardware_concurrency());
 
-        const int ret = poll(&pfd, 1, timeout_ms);
-        const bool client_pending = ret > 0 && (pfd.revents & POLLIN) != 0;
-        const bool file_due =
-            logger.enabled() && now_ms() - last_write_ms >= interval_ms;
+                // initial sample
+                ctx.sampler.sample();
 
-        if (client_pending || file_due) {
-            sampler.sample();
-            sampler.format_all(buf);
+                if (!ctx.server.valid()) {
+                    std::fprintf(stderr, "error: failed to create socket %s: %s\n",
+                                 SOCKET_PATH, std::strerror(errno));
+                    return 1;
+                }
 
-            if (client_pending) {
-                server.handle_client(buf);
-            }
+                if (ctx.log_file != nullptr) {
+                    ctx.logger.open(ctx.log_file);
+                    std::fprintf(stderr, "Logging to %s every %lu ms\n",
+                                 ctx.log_file, ctx.write_interval_ms);
+                    if (!ctx.logger.enabled()) {
+                        std::fprintf(stderr, "error: failed to open log file %s: %s\n",
+                                     ctx.log_file, std::strerror(errno));
+                        return 1;
+                    }
+                }
 
-            if (file_due) {
-                logger.write_snapshot(buf);
-                last_write_ms = now_ms();
-            }
+                ctx.fds.fd     = ctx.server.listen_fd();
+                ctx.fds.events = POLLIN;
+
+                s = state::RUN;
+            } break;
+            case state::RUN: {
+                if (ctx.logger.enabled()) {
+                    const int64_t elapsed = now_ms() - ctx.last_write_ms;
+                    const int64_t remain  = ctx.write_interval_ms - elapsed;
+                    if (remain >= std::numeric_limits<int>::max()) {
+                        std::fprintf(stderr, "warn: interval exceeded the numeric limits of the integer type");
+                    }
+                    timeout_ms = remain > 0 ? static_cast<int>(remain) : 0;
+                }
+
+                const int ret = poll(&ctx.fds, 1, timeout_ms);
+                const bool client_pending = ret > 0 && (ctx.fds.revents & POLLIN) != 0;
+
+                if (const bool file_due = ctx.logger.enabled() && now_ms() - ctx.last_write_ms >= ctx.write_interval_ms;
+                    client_pending || file_due) {
+                    ctx.sampler.sample();
+                    ctx.sampler.format_all(ctx.buf);
+
+                    if (client_pending) {
+                        ctx.server.handle_client(ctx.buf);
+                    }
+
+                    if (file_due) {
+                        ctx.logger.write_snapshot(ctx.buf);
+                        ctx.last_write_ms = now_ms();
+                    }
+                }
+            } break;
         }
     }
 }
