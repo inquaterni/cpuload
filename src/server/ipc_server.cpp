@@ -10,40 +10,40 @@
 #include "src/common/static_buffer.h"
 
 
-ipc_server::ipc_server() noexcept : listen_fd_(-1) {
+ipc_server::ipc_server() noexcept : listen_fd(-1) {
     unlink(SOCKET_PATH);
 
-    listen_fd_ = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (listen_fd_ < 0) return;
+    listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (listen_fd < 0) return;
 
     sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
     std::snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", SOCKET_PATH);
 
-    if (bind(listen_fd_,
+    if (bind(listen_fd,
              reinterpret_cast<sockaddr*>(&addr),
              sizeof(addr)) < 0) {
-        close(listen_fd_);
-        listen_fd_ = -1;
+        close(listen_fd);
+        listen_fd = -1;
         return;
     }
 
-    if (listen(listen_fd_, BACKLOG) < 0) {
-        close(listen_fd_);
+    if (listen(listen_fd, BACKLOG) < 0) {
+        close(listen_fd);
         unlink(SOCKET_PATH);
-        listen_fd_ = -1;
+        listen_fd = -1;
     }
 }
 
 ipc_server::~ipc_server() {
-    if (listen_fd_ >= 0) {
-        close(listen_fd_);
+    if (listen_fd >= 0) {
+        close(listen_fd);
         unlink(SOCKET_PATH);
     }
 }
 
 void ipc_server::handle_client(const static_buffer& response) const noexcept {
-    const int client_fd = accept(listen_fd_, nullptr, nullptr);
+    const int client_fd = accept(listen_fd, nullptr, nullptr);
     if (client_fd < 0) return;
 
     uint16_t cmd = 0;

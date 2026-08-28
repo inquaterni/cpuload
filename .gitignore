@@ -2,3 +2,4 @@ bazel-*
 .idea/
 .vscode/
 /build/
+massif.out*

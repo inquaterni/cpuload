@@ -1,42 +1,38 @@
 # Design Decisions and Justifications
+## Server-client architecture
 
-Here are the main design choices I made while building this CPU load monitoring app.
+The application is split into a long-running server and a one-shot client, communicating over a
+`SOCK_STREAM` Unix domain socket at `/tmp/cpuload.sock`.
 
-## Server-client architecture over Unix domain sockets
-
-I split the app into a background server and a client tool, your CLI, since app that constantly in the foreground
-is annoying. IPC a Unix domain socket at /tmp/cpuload.sock. 
-
-I thought about using POSIX pipes since they have a simpler API, but they are only one-way.
-I'd need two pipes per connection and extra bookkeeping to handle multiple clients. I'm more familiar with sockets,
-which give clean, request-response behavior in a single file descriptor, and the kernel handles moving data between
-the processes with basically zero overhead. I went with SOCK_STREAM because it naturally fits the lifecycle of
-connecting, sending the magic command, getting the data, and disconnecting, and it's simpler.
-
-## Init vs Run States
-
-I didn't bother making the Init and Run states explicit in the code. Basically all programs work like that, so there's 
-literally no reason to add an actual state machine for it. It's just too simple to be explicit.
+POSIX pipes were considered as an alternative IPC mechanism, but they are unidirectional by design.
+Supporting bidirectional communication would require two pipes per connection along with additional bookkeeping
+for multi-client scenarios. Unix domain sockets provide clean request-response semantics in a single file
+descriptor with minimal kernel overhead. `SOCK_STREAM` was chosen over `SOCK_DGRAM` because it maps directly
+to the connect-send-receive-close lifecycle of each client query, and it's API is simpler.
 
 ## /proc/stat for CPU load data
 
-The server reads the raw CPU counters directly from /proc/stat. There isn't a standard POSIX API for getting per-core
-utilization, so parsing /proc/stat is really the only viable way to do it on Linux.
+The server reads cumulative per-core CPU counters from `/proc/stat` and computes load as the percentage delta between
+two consecutive samples. There is no standard POSIX API that provides per-core CPU utilization breakdowns, making
+`/proc/stat` the only viable data source on Linux.
 
 ## Minimal user-space heap allocation
 
-I decided to write the entire user-space side without any explicit heap allocation at all. It didn't eliminate all
-heap usage though.
+All user-space data structures use stack or statically-sized storage. The binary is compiled with `-fno-exceptions`
+and `-fno-rtti`.
 
-But practically speaking, the stack footprint is tiny and very predictable:
-- cpu_sampler previous stats: ~16 KiB (max 256 cores)
-- cpu_sampler current stats: ~16 KiB
-- The buffer for reading /proc/stat: 64 KiB
-- Our custom fixed_buffer for formatting: ~8 KiB
+Residual heap usage comes exclusively from shared library internals:
+- `eh_alloc.cc`: 72 KiB, allocated by the dynamic linker before `main()`
+- timezone cache (`tzset`/`__tzfile_read`): ~1.4 KiB, allocated during Init via `file_logger` constructor
 
-Total peak stack usage is around 100 KiB, which is well within normal thread limits.
+### Stack footprint
 
-## poll() event multiplexing
+| Component                     | Size        |
+|-------------------------------|-------------|
+| `cpu_sampler::prev`           | 16.0625 KiB |
+| `cpu_sampler::curr`           | 16.0625 KiB |
+| `read_proc_stat` local buffer | 64 KiB      |
+| `static_buffer`               | 8.008 KiB   |
 
-The server's main loop uses poll() instead of something more complex. It's perfectly fine for the concurrency model 
-I implemented and keeps the code straightforward.
+Peak stack usage during sampling: 104.13 KiB, well within the default thread stack limit.
+Confirmed by Massif: idle stack ~41 KiB, peak ~107 KiB (including call frames).

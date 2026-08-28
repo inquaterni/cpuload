@@ -1,3 +1,6 @@
 build --cxxopt=-std=c++17
 build --cxxopt=-Wall
 build --cxxopt=-Wextra
+build --cxxopt=-Wpedantic
+build --cxxopt=-fno-exceptions
+build --cxxopt=-fno-rtti

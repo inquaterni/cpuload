@@ -13,15 +13,15 @@ public:
     ~ipc_server();
 
     [[nodiscard]]
-    constexpr bool valid() const noexcept { return listen_fd_ >= 0; }
+    constexpr bool valid() const noexcept { return listen_fd >= 0; }
 
     [[nodiscard]]
-    constexpr int listen_fd() const noexcept { return listen_fd_; }
+    constexpr int fd() const noexcept { return listen_fd; }
 
     void handle_client(const static_buffer& response) const noexcept;
 
 private:
-    int listen_fd_;
+    int listen_fd;
 };
 
 #endif  // CPULOAD_IPC_SERVER_H
