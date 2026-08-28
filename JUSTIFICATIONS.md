@@ -14,16 +14,7 @@ to the connect-send-receive-close lifecycle of each client query, and it's API i
 
 The server reads cumulative per-core CPU counters from `/proc/stat` and computes load as the percentage delta between
 two consecutive samples. There is no standard POSIX API that provides per-core CPU utilization breakdowns, making
-`/proc/stat` the only viable data source on Linux.
-
-## Minimal user-space heap allocation
-
-All user-space data structures use stack or statically-sized storage. The binary is compiled with `-fno-exceptions`
-and `-fno-rtti`.
-
-Residual heap usage comes exclusively from shared library internals:
-- `eh_alloc.cc`: 72 KiB, allocated by the dynamic linker before `main()`
-- timezone cache (`tzset`/`__tzfile_read`): ~1.4 KiB, allocated during Init via `file_logger` constructor
+`/proc/stat` the only viable data source on Linux which is my primary OS.
 
 ### Stack footprint
 
@@ -34,5 +25,5 @@ Residual heap usage comes exclusively from shared library internals:
 | `read_proc_stat` local buffer | 64 KiB      |
 | `static_buffer`               | 8.008 KiB   |
 
-Peak stack usage during sampling: 104.13 KiB, well within the default thread stack limit.
+Peak stack usage during sampling: 104.13 KiB, within the default thread stack limit of most POSIX-compliant OS'es.
 Confirmed by Massif: idle stack ~41 KiB, peak ~107 KiB (including call frames).

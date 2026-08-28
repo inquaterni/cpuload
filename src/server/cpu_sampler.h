@@ -53,7 +53,7 @@ private:
     std::array<cpu_times, MAX_CORES + 1> curr{};
     std::size_t num_cores;
 
-    static int read_proc_stat(std::array<cpu_times, MAX_CORES + 1>& out) noexcept;
+    static int read_proc_stat(std::array<cpu_times, MAX_CORES + 1> &out) noexcept;
 };
 
 constexpr int cpu_sampler::load_percent(const std::size_t index) const noexcept {
